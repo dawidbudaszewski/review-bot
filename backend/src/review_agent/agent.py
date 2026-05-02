@@ -107,7 +107,8 @@ def _parse_llm_response(raw: str) -> ReviewResult:
 def run(
     github: GitHubClient,
     litellm_api_key: str,
-    model: str = "gpt-4o",
+    model: str = "openai/gpt-4o",
+    api_base: str | None = None,
     update_description: bool = False,
 ) -> ReviewResult:
     """Run the review agent: fetch diff, analyze with LLM, post results."""
@@ -131,6 +132,7 @@ def run(
     response = completion(
         model=model,
         api_key=litellm_api_key,
+        api_base=api_base,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Review the following pull request diff:\n\n{diff_content}"},

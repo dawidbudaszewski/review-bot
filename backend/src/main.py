@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 def main() -> None:
     github_token = os.environ.get("GITHUB_TOKEN")
     litellm_api_key = os.environ.get("LITELLM_API_KEY")
+    litellm_api_base = os.environ.get("LITELLM_API_BASE")
     repo = os.environ.get("GITHUB_REPOSITORY")
     pr_number_raw = os.environ.get("PR_NUMBER")
 
@@ -39,7 +40,7 @@ def main() -> None:
     github = GitHubClient(token=github_token, repo=repo, pr_number=pr_number)  # type: ignore[arg-type]
 
     logger.info("=== Phase 1: Review Agent ===")
-    review_agent.run(github=github, litellm_api_key=litellm_api_key)  # type: ignore[arg-type]
+    review_agent.run(github=github, litellm_api_key=litellm_api_key, api_base=litellm_api_base)  # type: ignore[arg-type]
 
     logger.info("=== Phase 2: Approval Agent ===")
     approval_agent.run(github=github)
