@@ -4,6 +4,8 @@ import httpx
 
 from src.approval_agent.agent import (
     _find_review_body,
+    _format_approve_comment,
+    _format_hold_comment,
     _has_blockers,
     _parse_confidence,
     run,
@@ -123,6 +125,26 @@ class TestFindReviewBody:
         assert result is None
 
 
+class TestFormatComments:
+    def test_approve_comment_style(self):
+        comment = _format_approve_comment(5)
+        assert "Approval Agent" in comment
+        assert "APPROVED" in comment
+        assert "5/5" in comment
+        assert "approval-agent" in comment
+
+    def test_hold_comment_style(self):
+        comment = _format_hold_comment(1)
+        assert "Approval Agent" in comment
+        assert "ON HOLD" in comment
+        assert "1/5" in comment
+        assert "manual review" in comment
+
+    def test_handles_unknown_confidence(self):
+        assert "unknown" in _format_approve_comment(None)
+        assert "unknown" in _format_hold_comment(None)
+
+
 class TestApprovalAgentRun:
     def test_approves_clean_review(self):
         github = MagicMock()
@@ -133,6 +155,8 @@ class TestApprovalAgentRun:
         github.post_review.assert_called_once()
         call_kwargs = github.post_review.call_args.kwargs
         assert call_kwargs["event"] == "APPROVE"
+        assert "APPROVED" in call_kwargs["body"]
+        assert "Approval Agent" in call_kwargs["body"]
 
     def test_approves_p2_only_review(self):
         github = MagicMock()
@@ -144,13 +168,17 @@ class TestApprovalAgentRun:
         call_kwargs = github.post_review.call_args.kwargs
         assert call_kwargs["event"] == "APPROVE"
 
-    def test_does_not_approve_when_blockers(self):
+    def test_posts_hold_comment_when_blockers(self):
         github = MagicMock()
         github.get_pr_details.return_value = {"body": REVIEW_WITH_BLOCKERS}
 
         run(github=github)
 
         github.post_review.assert_not_called()
+        github.post_comment.assert_called_once()
+        comment_body = github.post_comment.call_args.args[0]
+        assert "ON HOLD" in comment_body
+        assert "Approval Agent" in comment_body
 
     def test_skips_when_no_review_found(self):
         github = MagicMock()
@@ -160,8 +188,9 @@ class TestApprovalAgentRun:
         run(github=github)
 
         github.post_review.assert_not_called()
+        github.post_comment.assert_not_called()
 
-    def test_handles_422_on_self_owned_pr(self):
+    def test_falls_back_to_comment_on_422(self):
         github = MagicMock()
         github.get_pr_details.return_value = {"body": CLEAN_REVIEW}
         mock_response = MagicMock()
@@ -171,4 +200,7 @@ class TestApprovalAgentRun:
         )
 
         run(github=github)
+
         github.post_review.assert_called_once()
+        github.post_comment.assert_called_once()
+        assert "APPROVED" in github.post_comment.call_args.args[0]

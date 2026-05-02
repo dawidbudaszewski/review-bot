@@ -36,6 +36,36 @@ def _has_blockers(body: str) -> bool:
     return bool(BLOCKER_PATTERN.search(body))
 
 
+def _format_approve_comment(confidence: int | None) -> str:
+    score_text = f"{confidence}/5" if confidence is not None else "unknown"
+    return (
+        "---\n"
+        "### :shield: Approval Agent\n"
+        "\n"
+        f"> **Decision: APPROVED** | Review confidence: {score_text}\n"
+        "\n"
+        "I've reviewed the code analysis findings and found **no blocking issues** (P0/P1). "
+        "This PR is cleared to merge.\n"
+        "\n"
+        "*— approval-agent (automated)*"
+    )
+
+
+def _format_hold_comment(confidence: int | None) -> str:
+    score_text = f"{confidence}/5" if confidence is not None else "unknown"
+    return (
+        "---\n"
+        "### :shield: Approval Agent\n"
+        "\n"
+        f"> **Decision: ON HOLD** | Review confidence: {score_text}\n"
+        "\n"
+        "Blocking issues (P0 or P1) were found in the code review. "
+        "This PR requires manual review before it can be merged.\n"
+        "\n"
+        "*— approval-agent (automated)*"
+    )
+
+
 def run(github: GitHubClient) -> None:
     """Read the review bot's posted output from the PR and decide whether to approve.
 
@@ -56,13 +86,17 @@ def run(github: GitHubClient) -> None:
 
     if blockers:
         logger.info("P0/P1 issues found in review — not approving. Manual review required.")
+        comment = _format_hold_comment(confidence)
+        github.post_comment(comment)
         return
 
     logger.info("No blockers found — approving PR.")
+    comment = _format_approve_comment(confidence)
     try:
-        github.post_review(body="", event="APPROVE")
+        github.post_review(body=comment, event="APPROVE")
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 422:
-            logger.warning("Cannot submit APPROVE (likely self-owned PR), skipping.")
+            logger.warning("Cannot submit APPROVE (likely self-owned PR), posting as comment instead.")
+            github.post_comment(comment)
         else:
             raise
