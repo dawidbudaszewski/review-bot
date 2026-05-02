@@ -39,10 +39,10 @@ def main() -> None:
     github = GitHubClient(token=github_token, repo=repo, pr_number=pr_number)  # type: ignore[arg-type]
 
     logger.info("=== Phase 1: Review Agent ===")
-    result = review_agent.run(github=github, litellm_api_key=litellm_api_key)  # type: ignore[arg-type]
+    review_agent.run(github=github, litellm_api_key=litellm_api_key)  # type: ignore[arg-type]
 
     logger.info("=== Phase 2: Approval Agent ===")
-    approval_agent.run(github=github, result=result)
+    approval_agent.run(github=github)
 
     logger.info("Review pipeline complete.")
 

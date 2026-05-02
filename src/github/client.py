@@ -82,6 +82,15 @@ class GitHubClient:
         response = self._http.patch(self._pr_url, json={"body": body})
         response.raise_for_status()
 
+    def get_comments(self) -> list[dict]:
+        """Fetch all issue comments on the PR."""
+        response = self._http.get(
+            f"/repos/{self._repo}/issues/{self._pr_number}/comments",
+            params={"per_page": 100},
+        )
+        response.raise_for_status()
+        return response.json()
+
     def add_reaction(self, emoji: str) -> None:
         """Add an emoji reaction to the PR (via the issue reactions API).
 

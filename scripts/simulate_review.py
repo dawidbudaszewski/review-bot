@@ -101,8 +101,8 @@ def main() -> None:
         for f in result.findings:
             print(f"  [{f.severity.value}] {f.file}:{f.line} - {f.description}")
 
-    print("\n=== Phase 2: Approval Agent ===")
-    approval_agent.run(github=github, result=result)
+    print("\n=== Phase 2: Approval Agent (reads from PR independently) ===")
+    approval_agent.run(github=github)
 
     print(f"\nDone! Check the PR: https://github.com/{repo}/pull/{pr_number}")
 
