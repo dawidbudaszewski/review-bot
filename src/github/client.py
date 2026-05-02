@@ -76,3 +76,19 @@ class GitHubClient:
         response = self._http.get(self._pr_url)
         response.raise_for_status()
         return response.json()
+
+    def update_pr_description(self, body: str) -> None:
+        """Update the PR body/description."""
+        response = self._http.patch(self._pr_url, json={"body": body})
+        response.raise_for_status()
+
+    def add_reaction(self, emoji: str) -> None:
+        """Add an emoji reaction to the PR (via the issue reactions API).
+
+        emoji: +1, -1, laugh, confused, heart, hooray, rocket, eyes
+        """
+        response = self._http.post(
+            f"/repos/{self._repo}/issues/{self._pr_number}/reactions",
+            json={"content": emoji},
+        )
+        response.raise_for_status()

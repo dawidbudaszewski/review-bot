@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 
 PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "review_system.md"
 
+BOT_NAME = "review-bot"
+
 
 def _build_diff_content(files: list[PRFile]) -> str:
     sections: list[str] = []
@@ -19,55 +21,60 @@ def _build_diff_content(files: list[PRFile]) -> str:
     return "\n\n".join(sections)
 
 
-def _format_summary_comment(result: ReviewResult) -> str:
-    score = result.confidence_score
-    total = len(result.findings)
+def _confidence_reasoning(result: ReviewResult) -> list[str]:
+    """Generate bullet-point reasoning for the confidence score, like Greptile."""
+    reasons: list[str] = []
 
+    if result.p0_count:
+        reasons.append(
+            f"Found {result.p0_count} critical issue(s) that must be fixed before merging"
+        )
+    if result.p1_count:
+        reasons.append(
+            f"Found {result.p1_count} high-severity issue(s) that should be addressed"
+        )
+    if result.p2_count:
+        reasons.append(
+            f"{result.p2_count} medium-severity suggestion(s) to consider for code quality"
+        )
+    if not result.findings:
+        reasons.append("No issues found — this PR is ready to merge")
+
+    return reasons
+
+
+def _format_summary_comment(result: ReviewResult, files_reviewed: int) -> str:
     lines = [
-        "## 🔍 AI Code Review",
-        "",
-        f"**Confidence Score: {score}/5** — "
-        + (
-            "Production ready"
-            if score == 5
-            else "Minor polish needed"
-            if score == 4
-            else "Implementation issues"
-            if score == 3
-            else "Significant problems"
-            if score == 2
-            else "Critical issues found"
-        ),
+        f"## {BOT_NAME} Summary",
         "",
         result.summary,
         "",
+        f"## Confidence Score: {result.confidence_score}/5",
+        "",
     ]
 
+    for reason in _confidence_reasoning(result):
+        lines.append(f"- {reason}")
+
+    lines.append("")
+
     if result.findings:
-        lines.append(f"### Issues Found ({total})")
+        lines.append("<details>")
+        lines.append("<summary>Issues Found</summary>")
         lines.append("")
-        lines.append("| Severity | Count |")
-        lines.append("|----------|-------|")
-        for sev in Severity:
-            count = sum(1 for f in result.findings if f.severity == sev)
-            if count:
-                lines.append(f"| **{sev.value}** ({SEVERITY_LABELS[sev]}) | {count} |")
+        lines.append("| Severity | File | Line | Description |")
+        lines.append("|----------|------|------|-------------|")
+        for f in result.findings:
+            lines.append(
+                f"| **{f.severity.value}** ({SEVERITY_LABELS[f.severity]}) "
+                f"| `{f.file}` | L{f.line} | {f.description} |"
+            )
+        lines.append("")
+        lines.append("</details>")
         lines.append("")
 
-        files_with_issues: dict[str, list[Finding]] = {}
-        for finding in result.findings:
-            files_with_issues.setdefault(finding.file, []).append(finding)
-
-        lines.append("### File Breakdown")
-        lines.append("")
-        for file, findings in files_with_issues.items():
-            lines.append(f"- **`{file}`** — {len(findings)} issue(s)")
-            for f in findings:
-                lines.append(f"  - `{f.severity.value}` L{f.line}: {f.description}")
-        lines.append("")
-    else:
-        lines.append("No issues found. This PR looks good to merge! ✅")
-        lines.append("")
+    comment_count = len(result.findings)
+    lines.append(f"{files_reviewed} file(s) reviewed, {comment_count} comment(s)")
 
     return "\n".join(lines)
 
@@ -97,8 +104,20 @@ def _parse_llm_response(raw: str) -> ReviewResult:
     return ReviewResult.model_validate(json.loads(cleaned.strip()))
 
 
-def run(github: GitHubClient, litellm_api_key: str, model: str = "gpt-4o") -> ReviewResult:
+def run(
+    github: GitHubClient,
+    litellm_api_key: str,
+    model: str = "gpt-4o",
+    update_description: bool = False,
+) -> ReviewResult:
     """Run the review agent: fetch diff, analyze with LLM, post results."""
+
+    logger.info("Reacting with 👀 to indicate analysis started...")
+    try:
+        github.add_reaction("eyes")
+    except Exception:
+        logger.warning("Could not add 👀 reaction, continuing anyway.")
+
     logger.info("Fetching PR files...")
     files = github.get_pr_files()
     if not files:
@@ -124,13 +143,24 @@ def run(github: GitHubClient, litellm_api_key: str, model: str = "gpt-4o") -> Re
     result = _parse_llm_response(raw_output)
     logger.info("Found %d issues (confidence: %d/5)", len(result.findings), result.confidence_score)
 
-    logger.info("Posting PR summary comment...")
-    summary_body = _format_summary_comment(result)
-    github.post_comment(summary_body)
+    summary_body = _format_summary_comment(result, files_reviewed=len(files))
+
+    if update_description:
+        logger.info("Updating PR description with review summary...")
+        github.update_pr_description(summary_body)
+    else:
+        logger.info("Posting PR summary comment...")
+        github.post_comment(summary_body)
 
     inline_comments = _build_inline_comments(result)
     if inline_comments:
         logger.info("Posting %d inline comments...", len(inline_comments))
-        github.post_review(body="Detailed findings from AI code review.", event="COMMENT", comments=inline_comments)
+        github.post_review(body="", event="COMMENT", comments=inline_comments)
+
+    logger.info("Reacting with 👍 to indicate review complete...")
+    try:
+        github.add_reaction("+1")
+    except Exception:
+        logger.warning("Could not add 👍 reaction, continuing anyway.")
 
     return result
