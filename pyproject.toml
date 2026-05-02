@@ -4,7 +4,12 @@ version = "0.1.0"
 description = "AI-powered PR review bot - Hackathon project"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "httpx>=0.28.1",
+    "litellm>=1.0.0",
+    "pydantic>=2.11.0",
+    "pydantic-settings>=2.10.0",
+]
 
 [build-system]
 requires = ["hatchling"]
