@@ -2,8 +2,8 @@ import logging
 import os
 import sys
 
+from src.approval_agent import agent as approval_agent
 from src.github.client import GitHubClient
-from src.review_agent import agent as review_agent
 
 logging.basicConfig(
     level=logging.INFO,
@@ -14,16 +14,12 @@ logger = logging.getLogger(__name__)
 
 def main() -> None:
     github_token = os.environ.get("GITHUB_TOKEN")
-    litellm_api_key = os.environ.get("LITELLM_API_KEY")
-    litellm_api_base = os.environ.get("LITELLM_API_BASE")
     repo = os.environ.get("GITHUB_REPOSITORY")
     pr_number_raw = os.environ.get("PR_NUMBER")
 
     missing = []
     if not github_token:
         missing.append("GITHUB_TOKEN")
-    if not litellm_api_key:
-        missing.append("LITELLM_API_KEY")
     if not repo:
         missing.append("GITHUB_REPOSITORY")
     if not pr_number_raw:
@@ -34,13 +30,13 @@ def main() -> None:
         sys.exit(1)
 
     pr_number = int(pr_number_raw)  # type: ignore[arg-type]
-    logger.info("Starting review for %s PR #%d", repo, pr_number)
+    logger.info("Starting approval check for %s PR #%d", repo, pr_number)
 
     github = GitHubClient(token=github_token, repo=repo, pr_number=pr_number)  # type: ignore[arg-type]
 
-    review_agent.run(github=github, litellm_api_key=litellm_api_key, api_base=litellm_api_base)  # type: ignore[arg-type]
+    approval_agent.run(github=github)
 
-    logger.info("Review complete.")
+    logger.info("Approval check complete.")
 
 
 if __name__ == "__main__":
