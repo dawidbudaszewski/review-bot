@@ -15,22 +15,45 @@ import {
 } from "@/components/status-badge";
 import type { PRSummary } from "@/lib/github";
 
+function StateBadge({ state }: { state: string }) {
+  switch (state) {
+    case "merged":
+      return (
+        <Badge className="bg-purple-100 text-purple-700 hover:bg-purple-100 border-0">
+          Merged
+        </Badge>
+      );
+    case "closed":
+      return (
+        <Badge className="bg-red-50 text-red-600 hover:bg-red-50 border-0">
+          Closed
+        </Badge>
+      );
+    default:
+      return (
+        <Badge className="bg-emerald-50 text-emerald-700 hover:bg-emerald-50 border-0">
+          Open
+        </Badge>
+      );
+  }
+}
+
 function SeverityCounts({ findings }: { findings: PRSummary["review"]["findings"] }) {
   const p0 = findings.filter((f) => f.severity === "P0").length;
   const p1 = findings.filter((f) => f.severity === "P1").length;
   const p2 = findings.filter((f) => f.severity === "P2").length;
 
   if (findings.length === 0) {
-    return <span className="text-muted-foreground text-sm">—</span>;
+    return <span className="text-muted-foreground text-sm">--</span>;
   }
 
   return (
-    <div className="flex gap-1.5">
+    <div className="flex items-center gap-1.5">
       {p0 > 0 && <SeverityBadge severity="P0" />}
       {p1 > 0 && <SeverityBadge severity="P1" />}
       {p2 > 0 && <SeverityBadge severity="P2" />}
-      <span className="text-muted-foreground text-xs self-center ml-1">
-        {findings.length} total
+      <span className="text-muted-foreground text-xs ml-0.5">
+        {findings.length}
       </span>
     </div>
   );
@@ -51,7 +74,11 @@ function RelativeTime({ date }: { date: string }) {
   else text = `${diffDays}d ago`;
 
   return (
-    <time dateTime={date} title={d.toLocaleString()} className="text-muted-foreground text-sm whitespace-nowrap">
+    <time
+      dateTime={date}
+      title={d.toLocaleString()}
+      className="text-muted-foreground text-sm whitespace-nowrap"
+    >
       {text}
     </time>
   );
@@ -60,84 +87,78 @@ function RelativeTime({ date }: { date: string }) {
 export function PRTable({ prs }: { prs: PRSummary[] }) {
   if (prs.length === 0) {
     return (
-      <div className="rounded-lg border p-12 text-center text-muted-foreground">
+      <div className="p-12 text-center text-muted-foreground">
         No pull requests found. Make sure GITHUB_REPO is configured correctly.
       </div>
     );
   }
 
   return (
-    <div className="rounded-lg border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="w-[80px]">PR</TableHead>
-            <TableHead>Title</TableHead>
-            <TableHead className="w-[120px]">Confidence</TableHead>
-            <TableHead className="w-[200px]">Findings</TableHead>
-            <TableHead className="w-[120px]">Status</TableHead>
-            <TableHead className="w-[100px]">Updated</TableHead>
-            <TableHead className="w-[80px]" />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {prs.map((pr) => (
-            <TableRow key={pr.number}>
-              <TableCell>
-                <a
-                  href={pr.htmlUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-mono text-sm text-muted-foreground hover:text-foreground"
-                >
-                  #{pr.number}
-                </a>
-              </TableCell>
-              <TableCell>
-                <div className="flex flex-col gap-0.5">
-                  <Link
-                    href={`/pr/${pr.number}`}
-                    className="font-medium hover:underline"
-                  >
-                    {pr.title}
-                  </Link>
-                  <span className="text-xs text-muted-foreground">
-                    by {pr.author}
-                  </span>
-                </div>
-              </TableCell>
-              <TableCell>
-                <ConfidenceScore score={pr.review.confidenceScore} />
-              </TableCell>
-              <TableCell>
-                <SeverityCounts findings={pr.review.findings} />
-              </TableCell>
-              <TableCell>
-                <div className="flex items-center gap-2">
-                  <ApprovalBadge status={pr.review.approvalStatus} />
-                  <Badge
-                    variant="outline"
-                    className="text-xs capitalize"
-                  >
-                    {pr.state}
-                  </Badge>
-                </div>
-              </TableCell>
-              <TableCell>
-                <RelativeTime date={pr.updatedAt} />
-              </TableCell>
-              <TableCell>
+    <Table>
+      <TableHeader>
+        <TableRow className="hover:bg-transparent">
+          <TableHead className="w-16 pl-6">PR</TableHead>
+          <TableHead>Title</TableHead>
+          <TableHead className="w-28">Confidence</TableHead>
+          <TableHead className="w-40">Findings</TableHead>
+          <TableHead className="w-28">Review</TableHead>
+          <TableHead className="w-24">State</TableHead>
+          <TableHead className="w-24">Updated</TableHead>
+          <TableHead className="w-20 pr-6" />
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {prs.map((pr) => (
+          <TableRow key={pr.number} className="group">
+            <TableCell className="pl-6">
+              <a
+                href={pr.htmlUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-mono text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                #{pr.number}
+              </a>
+            </TableCell>
+            <TableCell>
+              <div className="flex flex-col">
                 <Link
                   href={`/pr/${pr.number}`}
-                  className="text-sm text-primary hover:underline"
+                  className="font-medium text-sm hover:underline underline-offset-4"
                 >
-                  Details →
+                  {pr.title}
                 </Link>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+                <span className="text-xs text-muted-foreground">
+                  {pr.author}
+                </span>
+              </div>
+            </TableCell>
+            <TableCell>
+              <ConfidenceScore score={pr.review.confidenceScore} />
+            </TableCell>
+            <TableCell>
+              <SeverityCounts findings={pr.review.findings} />
+            </TableCell>
+            <TableCell>
+              <ApprovalBadge status={pr.review.approvalStatus} />
+            </TableCell>
+            <TableCell>
+              <StateBadge state={pr.state} />
+            </TableCell>
+            <TableCell>
+              <RelativeTime date={pr.updatedAt} />
+            </TableCell>
+            <TableCell className="pr-6">
+              <Link
+                href={`/pr/${pr.number}`}
+                className="text-xs text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground transition-all"
+              >
+                View &rarr;
+              </Link>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }

@@ -24,7 +24,7 @@ export interface Finding {
   description: string;
 }
 
-export type ApprovalStatus = "approved" | "on_hold" | "pending";
+export type ApprovalStatus = "approved" | "on_hold" | "pending" | "none";
 
 export interface ReviewData {
   summary: string | null;
@@ -34,6 +34,13 @@ export interface ReviewData {
   approvalComment: string | null;
 }
 
+export interface TimelineEvent {
+  kind: "pr_opened" | "review_bot" | "approval_agent" | "comment" | "merged" | "closed";
+  actor: string;
+  timestamp: string;
+  body: string | null;
+}
+
 export interface PRSummary {
   number: number;
   title: string;
@@ -41,10 +48,15 @@ export interface PRSummary {
   state: string;
   createdAt: string;
   updatedAt: string;
+  mergedAt: string | null;
   htmlUrl: string;
   headBranch: string;
   baseBranch: string;
   review: ReviewData;
+}
+
+export interface PRDetail extends PRSummary {
+  timeline: TimelineEvent[];
 }
 
 // ─── Markdown Parsing ────────────────────────────────────────────────
@@ -106,16 +118,26 @@ function extractSummaryText(body: string): string | null {
   return afterMarker.slice(0, confIdx).trim() || null;
 }
 
-function buildReviewData(prBody: string, comments: GitHubComment[]): ReviewData {
+function buildReviewData(prBody: string, comments: GitHubComment[], isTerminal: boolean, reviews?: GitHubReview[]): ReviewData {
   const reviewBody = findReviewBody(prBody, comments);
-  const approvalBody = findApprovalBody(comments);
+  let approvalBody = findApprovalBody(comments);
+  if (!approvalBody && reviews) {
+    for (const r of reviews) {
+      if (r.body?.includes(APPROVAL_MARKER)) {
+        approvalBody = r.body;
+        break;
+      }
+    }
+  }
+  const rawStatus = parseApprovalStatus(approvalBody);
+  const approvalStatus = rawStatus === "pending" && isTerminal ? "none" : rawStatus;
 
   if (!reviewBody) {
     return {
       summary: null,
       confidenceScore: null,
       findings: [],
-      approvalStatus: parseApprovalStatus(approvalBody),
+      approvalStatus,
       approvalComment: approvalBody,
     };
   }
@@ -124,7 +146,7 @@ function buildReviewData(prBody: string, comments: GitHubComment[]): ReviewData 
     summary: extractSummaryText(reviewBody),
     confidenceScore: parseConfidence(reviewBody),
     findings: parseFindings(reviewBody),
-    approvalStatus: parseApprovalStatus(approvalBody),
+    approvalStatus,
     approvalComment: approvalBody,
   };
 }
@@ -135,6 +157,7 @@ interface GitHubPR {
   number: number;
   title: string;
   state: string;
+  merged_at: string | null;
   body: string | null;
   html_url: string;
   created_at: string;
@@ -148,6 +171,13 @@ interface GitHubComment {
   body: string;
   user: { login: string };
   created_at: string;
+}
+
+interface GitHubReview {
+  state: string;
+  body: string | null;
+  user: { login: string };
+  submitted_at: string;
 }
 
 async function ghFetch<T>(path: string): Promise<T> {
@@ -169,18 +199,21 @@ export async function listPRs(): Promise<PRSummary[]> {
 
   const summaries = await Promise.all(
     prs.map(async (pr) => {
-      const comments = await ghFetch<GitHubComment[]>(
-        `/repos/${repo}/issues/${pr.number}/comments?per_page=100`
-      );
-      const review = buildReviewData(pr.body ?? "", comments);
+      const [comments, reviews] = await Promise.all([
+        ghFetch<GitHubComment[]>(`/repos/${repo}/issues/${pr.number}/comments?per_page=100`),
+        ghFetch<GitHubReview[]>(`/repos/${repo}/pulls/${pr.number}/reviews?per_page=100`),
+      ]);
+      const isTerminal = pr.state === "closed";
+      const review = buildReviewData(pr.body ?? "", comments, isTerminal, reviews);
 
       return {
         number: pr.number,
         title: pr.title,
         author: pr.user.login,
-        state: pr.state,
+        state: pr.merged_at ? "merged" : pr.state,
         createdAt: pr.created_at,
         updatedAt: pr.updated_at,
+        mergedAt: pr.merged_at,
         htmlUrl: pr.html_url,
         headBranch: pr.head.ref,
         baseBranch: pr.base.ref,
@@ -192,24 +225,101 @@ export async function listPRs(): Promise<PRSummary[]> {
   return summaries;
 }
 
-export async function getPRDetail(prNumber: number): Promise<PRSummary> {
+function buildTimeline(pr: GitHubPR, comments: GitHubComment[], reviews: GitHubReview[]): TimelineEvent[] {
+  const events: TimelineEvent[] = [];
+  let hasApprovalFromComments = false;
+
+  events.push({
+    kind: "pr_opened",
+    actor: pr.user.login,
+    timestamp: pr.created_at,
+    body: null,
+  });
+
+  for (const c of comments) {
+    const body = c.body ?? "";
+    if (body.includes(REVIEW_BOT_MARKER)) {
+      events.push({
+        kind: "review_bot",
+        actor: c.user.login,
+        timestamp: c.created_at,
+        body,
+      });
+    } else if (body.includes(APPROVAL_MARKER)) {
+      hasApprovalFromComments = true;
+      events.push({
+        kind: "approval_agent",
+        actor: c.user.login,
+        timestamp: c.created_at,
+        body,
+      });
+    } else {
+      events.push({
+        kind: "comment",
+        actor: c.user.login,
+        timestamp: c.created_at,
+        body,
+      });
+    }
+  }
+
+  if (!hasApprovalFromComments) {
+    for (const r of reviews) {
+      if (r.body?.includes(APPROVAL_MARKER)) {
+        events.push({
+          kind: "approval_agent",
+          actor: r.user.login,
+          timestamp: r.submitted_at,
+          body: r.body,
+        });
+        break;
+      }
+    }
+  }
+
+  if (pr.merged_at) {
+    events.push({
+      kind: "merged",
+      actor: pr.user.login,
+      timestamp: pr.merged_at,
+      body: null,
+    });
+  } else if (pr.state === "closed") {
+    events.push({
+      kind: "closed",
+      actor: pr.user.login,
+      timestamp: pr.updated_at,
+      body: null,
+    });
+  }
+
+  events.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  return events;
+}
+
+export async function getPRDetail(prNumber: number): Promise<PRDetail> {
   const repo = repoSlug();
-  const pr = await ghFetch<GitHubPR>(`/repos/${repo}/pulls/${prNumber}`);
-  const comments = await ghFetch<GitHubComment[]>(
-    `/repos/${repo}/issues/${prNumber}/comments?per_page=100`
-  );
-  const review = buildReviewData(pr.body ?? "", comments);
+  const [pr, comments, reviews] = await Promise.all([
+    ghFetch<GitHubPR>(`/repos/${repo}/pulls/${prNumber}`),
+    ghFetch<GitHubComment[]>(`/repos/${repo}/issues/${prNumber}/comments?per_page=100`),
+    ghFetch<GitHubReview[]>(`/repos/${repo}/pulls/${prNumber}/reviews?per_page=100`),
+  ]);
+  const isTerminal = pr.state === "closed";
+  const review = buildReviewData(pr.body ?? "", comments, isTerminal, reviews);
+  const timeline = buildTimeline(pr, comments, reviews);
 
   return {
     number: pr.number,
     title: pr.title,
     author: pr.user.login,
-    state: pr.state,
+    state: pr.merged_at ? "merged" : pr.state,
     createdAt: pr.created_at,
     updatedAt: pr.updated_at,
+    mergedAt: pr.merged_at,
     htmlUrl: pr.html_url,
     headBranch: pr.head.ref,
     baseBranch: pr.base.ref,
     review,
+    timeline,
   };
 }
